@@ -12,7 +12,9 @@ import pandas as pd
 from src.procurement_optimizer import (
     calculate_ration_demand,
     optimize_procurement,
+    parse_supplier_offers,
     resolve_saved_herd_dmi,
+    select_best_supplier_offer,
 )
 
 # Add project root to system path
@@ -1257,6 +1259,16 @@ with tab_feed:
                 key="proc_budget",
             )
 
+        supplier_offer_text = st.text_area(
+            "Supplier offers (ingredient | supplier | unit cost | delivery lead time in days)",
+            placeholder="Maize | Supplier A | 0.42 | 3\nMaize | Supplier B | 0.39 | 5",
+            help=(
+                "For ingredients flagged for reorder, offers qualify when delivery lead time is no longer "
+                "than current stock coverage (stock ÷ planned daily demand). Offers are informational only."
+            ),
+            key="supplier_offer_comparison_input",
+        )
+
         if st.button(
             "Optimize Feed Procurement",
             type="primary",
@@ -1264,6 +1276,7 @@ with tab_feed:
             disabled=not forecast_ready,
         ):
             try:
+                supplier_offers = parse_supplier_offers(supplier_offer_text)
                 procurement_demand = calculate_ration_demand(
                     inventory,
                     herd_daily_dmi,
@@ -1302,6 +1315,41 @@ with tab_feed:
                     st.success("The available budget covers all calculated purchase requirements.")
 
                 recommendations = result["recommendations"]
+
+                reorder_recommendations = [
+                    row for row in recommendations if row["priority"] != "LOW"
+                ]
+                if reorder_recommendations:
+                    offer_comparisons = []
+                    demand_by_name = {
+                        row["feed_name"].casefold(): row
+                        for row in procurement_inventory
+                    }
+                    for recommendation in reorder_recommendations:
+                        feed_name = recommendation["feed_name"]
+                        feed_offers = [
+                            offer for offer in supplier_offers
+                            if offer["feed_name"].casefold() == feed_name.casefold()
+                        ]
+                        coverage = demand_by_name[feed_name.casefold()]["days_of_stock_remaining"]
+                        selected_offer = select_best_supplier_offer(feed_offers, coverage)
+                        offer_comparisons.append({
+                            "Ingredient": feed_name,
+                            "Delivery deadline (stock coverage days)": coverage,
+                            "Comparison result": (
+                                "Eligible offer found" if selected_offer
+                                else "No eligible supplier found"
+                            ),
+                            "Offer supplier": selected_offer["supplier_name"] if selected_offer else "—",
+                            "Offer unit cost": selected_offer["unit_cost"] if selected_offer else "—",
+                            "Offer lead time (days)": selected_offer["delivery_lead_time_days"] if selected_offer else "—",
+                        })
+                    st.write("**Supplier offer comparison (manual decision support)**")
+                    st.dataframe(pd.DataFrame(offer_comparisons), hide_index=True, use_container_width=True)
+                    st.caption(
+                        "Only offers that can arrive within current stock coverage are eligible. "
+                        "The lowest-cost eligible offer is shown; inventory supplier details are unchanged."
+                    )
 
                 if recommendations:
                     proc_df = pd.DataFrame(recommendations)

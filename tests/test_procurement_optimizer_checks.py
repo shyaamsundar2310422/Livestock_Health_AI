@@ -3,7 +3,10 @@
 from src.procurement_optimizer import (
     calculate_ration_demand,
     optimize_procurement,
+    parse_supplier_offers,
     resolve_saved_herd_dmi,
+    select_best_supplier_offer,
+    validate_supplier_offer,
 )
 
 
@@ -163,3 +166,50 @@ def test_ration_demand_rejects_invalid_totals():
             {"Maize": 40, "Wheat": 40},
             planning_horizon_days=7,
         )
+
+
+def test_supplier_offer_validation_and_parsing():
+    offer = validate_supplier_offer({
+        "feed_name": " Maize ",
+        "supplier_name": " Supplier A ",
+        "unit_cost": "0.42",
+        "delivery_lead_time_days": "3",
+    })
+    assert offer == {
+        "feed_name": "Maize",
+        "supplier_name": "Supplier A",
+        "unit_cost": 0.42,
+        "delivery_lead_time_days": 3.0,
+    }
+    assert parse_supplier_offers("Maize | Supplier A | 0.42 | 3") == [offer]
+    with pytest.raises(ValueError, match="supplier name"):
+        validate_supplier_offer({**offer, "supplier_name": " "})
+    with pytest.raises(ValueError, match="non-negative"):
+        validate_supplier_offer({**offer, "unit_cost": -1})
+
+
+def test_supplier_comparison_selects_lowest_cost_offer_meeting_deadline():
+    offers = [
+        {"feed_name": "Maize", "supplier_name": "Slow", "unit_cost": 0.20, "delivery_lead_time_days": 5},
+        {"feed_name": "Maize", "supplier_name": "Fast Expensive", "unit_cost": 0.50, "delivery_lead_time_days": 2},
+        {"feed_name": "Maize", "supplier_name": "Best Eligible", "unit_cost": 0.30, "delivery_lead_time_days": 3},
+    ]
+    selected = select_best_supplier_offer(offers, delivery_deadline_days=3)
+    assert selected["supplier_name"] == "Best Eligible"
+
+
+def test_supplier_comparison_reports_no_offer_within_deadline():
+    offers = [
+        {"feed_name": "Maize", "supplier_name": "Slow", "unit_cost": 0.20, "delivery_lead_time_days": 5},
+    ]
+    assert select_best_supplier_offer(offers, delivery_deadline_days=3) is None
+    assert select_best_supplier_offer(offers, delivery_deadline_days=None) is None
+
+
+def test_supplier_offer_ties_resolve_deterministically():
+    offers = [
+        {"feed_name": "Maize", "supplier_name": "Zulu", "unit_cost": 0.30, "delivery_lead_time_days": 2},
+        {"feed_name": "Maize", "supplier_name": "Alpha", "unit_cost": 0.30, "delivery_lead_time_days": 2},
+    ]
+    selected = select_best_supplier_offer(offers, delivery_deadline_days=3)
+    assert selected["supplier_name"] == "Alpha"

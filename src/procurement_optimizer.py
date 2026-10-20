@@ -5,6 +5,88 @@ import math
 from src.feed_inventory import validate_feed_inventory_item
 
 
+def validate_supplier_offer(offer):
+    """Validate and normalize one manually entered supplier offer."""
+    feed_name = str(offer.get("feed_name", "")).strip()
+    supplier_name = str(offer.get("supplier_name", "")).strip()
+    if not feed_name:
+        raise ValueError("Supplier offer ingredient name cannot be empty.")
+    if not supplier_name:
+        raise ValueError("Supplier offer supplier name cannot be empty.")
+
+    values = {}
+    for field in ("unit_cost", "delivery_lead_time_days"):
+        try:
+            value = float(offer[field])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"Supplier offer {field} must be non-negative.") from exc
+        if not math.isfinite(value) or value < 0:
+            raise ValueError(f"Supplier offer {field} must be finite and non-negative.")
+        values[field] = value
+
+    return {
+        "feed_name": feed_name,
+        "supplier_name": supplier_name,
+        **values,
+    }
+
+
+def parse_supplier_offers(text):
+    """Parse manual offers formatted as ingredient|supplier|cost|lead days."""
+    offers = []
+    for line_number, line in enumerate(str(text or "").splitlines(), start=1):
+        if not line.strip():
+            continue
+        fields = [field.strip() for field in line.split("|")]
+        if len(fields) != 4:
+            raise ValueError(
+                f"Supplier offer line {line_number} must contain ingredient, "
+                "supplier, unit cost, and delivery lead time separated by |."
+            )
+        offers.append(validate_supplier_offer({
+            "feed_name": fields[0],
+            "supplier_name": fields[1],
+            "unit_cost": fields[2],
+            "delivery_lead_time_days": fields[3],
+        }))
+    return offers
+
+
+def select_best_supplier_offer(offers, delivery_deadline_days):
+    """Return the lowest-cost offer arriving within stock coverage, or None.
+
+    The delivery deadline is the ingredient's remaining stock coverage in days
+    (available stock / planned daily demand), matching procurement's existing
+    stock-out and lead-time urgency logic. Ties resolve by lead time, then
+    supplier name, so repeated runs return the same offer.
+    """
+    if delivery_deadline_days is None:
+        return None
+    try:
+        deadline = float(delivery_deadline_days)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Delivery deadline must be a finite, non-negative number.") from exc
+    if not math.isfinite(deadline) or deadline < 0:
+        raise ValueError("Delivery deadline must be a finite, non-negative number.")
+
+    eligible = [
+        validate_supplier_offer(offer)
+        for offer in offers
+    ]
+    eligible = [offer for offer in eligible if offer["delivery_lead_time_days"] <= deadline]
+    if not eligible:
+        return None
+    return min(
+        eligible,
+        key=lambda offer: (
+            offer["unit_cost"],
+            offer["delivery_lead_time_days"],
+            offer["supplier_name"].casefold(),
+            offer["supplier_name"],
+        ),
+    )
+
+
 def resolve_saved_herd_dmi(animals, prediction_lookup):
     """Sum each registered animal's latest valid saved DMI prediction.
 
