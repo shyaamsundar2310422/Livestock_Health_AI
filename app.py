@@ -541,7 +541,12 @@ with tab_twin:
                     risk_info = curr_twin.get("risk_assessment", {})
                     risk_status = risk_info.get("status", "Not assessed")
                     risk_score = risk_info.get("risk_score", 0)
-                    st.metric("Multimodal Risk", f"{risk_status} ({risk_score}/10 pts)")
+                    risk_display = (
+                        "Not assessed"
+                        if risk_status == "Not assessed"
+                        else f"{risk_status} ({risk_score}/10 pts)"
+                    )
+                    st.metric("Multimodal Risk", risk_display)
                 with t_col5:
                     latest_dmi = curr_twin.get("latest_dmi")
                     if latest_dmi and latest_dmi.get("predicted_dmi_kg_day") is not None:
@@ -583,10 +588,12 @@ with tab_twin:
                     st.write("#### 🛡️ Transparent Multimodal Risk Assessment")
                     st.caption("Reused from rule-based framework in research notebook (Cell 29).")
 
-                    risk_status = risk_info.get("status", "Low")
+                    risk_status = risk_info.get("status", "Not assessed")
                     risk_score = risk_info.get("risk_score", 0)
 
-                    if risk_status == "High":
+                    if risk_status == "Not assessed":
+                        st.markdown("### Status: Not assessed")
+                    elif risk_status == "High":
                         st.markdown(f"### Status: <span class='risk-high'>HIGH RISK (Score: {risk_score})</span>", unsafe_allow_html=True)
                     elif risk_status == "Moderate":
                         st.markdown(f"### Status: <span class='risk-moderate'>MODERATE RISK (Score: {risk_score})</span>", unsafe_allow_html=True)
